@@ -215,7 +215,7 @@ const packs = [
 
   {
     name: "Imposters Pack",
-    price: 0,
+    price: 25,
     image: "assets/packs/imposters (1).png",
     description:
       "Welcome to Blocket! Start your collection with the Starter Pack.",
