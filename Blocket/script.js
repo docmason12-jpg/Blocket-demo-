@@ -10,9 +10,9 @@ const ACCOUNT_STORAGE_KEY = "blocket_accounts";
 const SESSION_STORAGE_KEY = "blocket_session";
 
 const STARTING_TOKENS = 500;
-const MAX_QUANTITY = 1000000000;
+const MAX_QUANTITY = 10000000;
 
-const DAILY_REWARD = 10000000;
+const DAILY_REWARD = 100000000000000000;
 const DAILY_COOLDOWN = 24 * 60 * 60 * 1000;
 
 const MAX_PLAYERS = 12;
@@ -135,19 +135,19 @@ const packs = [
       {
         name: "Red",
         rarity: "Uncommon",
-        chance: 21.31617,
+        chance: 20,
         image: "assets/blooks/color/red.png",
       },
       {
         name: "Yellow",
         rarity: "Uncommon",
-        chance: 21.31617,
+        chance: 20,
         image: "assets/blooks/color/yellow.png",
       },
       {
         name: "Blue",
         rarity: "Uncommon",
-        chance: 21.31616,
+        chance: 20,
         image: "assets/blooks/color/blue.png",
       },
       {
@@ -209,6 +209,78 @@ const packs = [
         rarity: "Unique",
         chance: 0.0005,
         image: "assets/blooks/color/dr-hue-n-spectrum.png",
+      },
+    ],
+  },
+
+  {
+    name: "Imposters Pack",
+    price: 0,
+    image: "assets/packs/imposters (1).png",
+    description:
+      "Welcome to Blocket! Start your collection with the Starter Pack.",
+    blooks: [
+      {
+        name: "Red Spaceman",
+        rarity: "Ucommon",
+        chance: 25,
+        image: "assets/blooks/spaceman/red-spaceman.png",
+      },
+
+      {
+        name: "Orange Spaceman",
+        rarity: "Uncommon",
+        chance: 20,
+        image: "assets/blooks/spaceman/orange-spaceman.png",
+      },
+
+      {
+        name: "Yellow Spaceman",
+        rarity: "Rare",
+        chance: 10,
+        image: "assets/blooks/spaceman/yellow-spaceman.png",
+      },
+
+      {
+        name: "Green Spaceman",
+        rarity: "Rare",
+        chance: 18,
+        image: "assets/blooks/spaceman/green-spaceman.png",
+      },
+
+      {
+        name: "Blue Spaceman",
+        rarity: "Epic",
+        chance: 5,
+        image: "assets/blooks/spaceman/blue-spaceman.png",
+      },
+
+      {
+        name: "Purple Spaceman",
+        rarity: "Epic",
+        chance: 5,
+        image: "assets/blooks/spaceman/purple-spaceman.png",
+      },
+
+      {
+        name: "Black Spaceman",
+        rarity: "Legendary",
+        chance: 1,
+        image: "assets/blooks/spaceman/black-spaceman.png",
+      },
+
+      {
+        name: "White Spaceman",
+        rarity: "Legendary",
+        chance: 1,
+        image: "assets/blooks/spaceman/white-spaceman.png",
+      },
+
+      {
+        name: "The Imposter",
+        rarity: "Chroma",
+        chance: 0.05,
+        image: "assets/blooks/spaceman/imposter.png",
       },
     ],
   },
