@@ -1,0 +1,2927 @@
+// ========================================
+// BLOCKET - IMPOSTERS
+// Update 2: Ghosts + Meetings
+// Includes Stage 1 core systems
+// ========================================
+
+// ========================================
+// SETTINGS
+// ========================================
+
+const MAP_TILE_SIZE = 32;
+const MAP_WIDTH = 30;
+const MAP_HEIGHT = 22;
+const MAP_PIXEL_WIDTH = MAP_WIDTH * MAP_TILE_SIZE;
+const MAP_PIXEL_HEIGHT = MAP_HEIGHT * MAP_TILE_SIZE;
+
+const PLAYER_SPEED = 3.2;
+const PLAYER_RADIUS = 12;
+
+const IMPOSTER_TASK_DISTANCE = 55;
+const IMPOSTER_KILL_DISTANCE = 48;
+const IMPOSTER_UNLOCK_DISTANCE = 65;
+
+const IMPOSTER_MAX_PLAYERS = 12;
+const IMPOSTER_MIN_PLAYERS = 3;
+
+const IMPOSTER_KILL_COOLDOWN = 15000;
+const IMPOSTER_DEFAULT_TASK_COUNT = 3;
+
+const MEETING_DISCUSSION_DEFAULT = 60;
+const MEETING_VOTING_SECONDS = 30;
+const MEETING_REVOTE_SECONDS = 20;
+const MEETING_REPORT_DISTANCE = 65;
+const MEETING_EMERGENCY_LIMIT = 1;
+
+// ========================================
+// TASKS
+// ========================================
+
+const IMPOSTER_TASKS = [
+  {
+    id: "power",
+    name: "Power Calibration",
+    room: "ENGINE",
+    x: 19 * MAP_TILE_SIZE + 16,
+    y: 5 * MAP_TILE_SIZE + 16,
+    question: "What is 12 × 8?",
+    answers: ["86", "96", "108", "112"],
+    correct: "96",
+  },
+  {
+    id: "security",
+    name: "Security Check",
+    room: "SECURITY",
+    x: 23 * MAP_TILE_SIZE + 16,
+    y: 5 * MAP_TILE_SIZE + 16,
+    question: "How many sides does a hexagon have?",
+    answers: ["5", "6", "7", "8"],
+    correct: "6",
+  },
+  {
+    id: "storage",
+    name: "Supply Inventory",
+    room: "STORAGE",
+    x: 5 * MAP_TILE_SIZE + 16,
+    y: 15 * MAP_TILE_SIZE + 16,
+    question: "What is the opposite of north?",
+    answers: ["East", "West", "South", "Up"],
+    correct: "South",
+  },
+  {
+    id: "admin",
+    name: "Data Upload",
+    room: "ADMIN",
+    x: 14 * MAP_TILE_SIZE + 16,
+    y: 15 * MAP_TILE_SIZE + 16,
+    question: "Which is a primary color of light?",
+    answers: ["Green", "Orange", "Purple", "Brown"],
+    correct: "Green",
+  },
+  {
+    id: "reactor",
+    name: "Reactor Check",
+    room: "REACTOR",
+    x: 24 * MAP_TILE_SIZE + 16,
+    y: 15 * MAP_TILE_SIZE + 16,
+    question: "What is the chemical symbol for water?",
+    answers: ["CO2", "H2O", "O2", "NaCl"],
+    correct: "H2O",
+  },
+  {
+    id: "cafeteria",
+    name: "Cafeteria Cleanup",
+    room: "CAFETERIA",
+    x: 6 * MAP_TILE_SIZE + 16,
+    y: 5 * MAP_TILE_SIZE + 16,
+    question: "How many minutes are in one hour?",
+    answers: ["30", "45", "60", "90"],
+    correct: "60",
+  },
+];
+
+const IMPOSTER_UNLOCK_QUESTIONS = [
+  {
+    question: "What is 7 × 8?",
+    answers: ["54", "56", "64", "48"],
+    correct: "56",
+  },
+  {
+    question: "Which planet is known as the Red Planet?",
+    answers: ["Venus", "Mars", "Jupiter", "Saturn"],
+    correct: "Mars",
+  },
+  {
+    question: "How many sides does a triangle have?",
+    answers: ["2", "3", "4", "5"],
+    correct: "3",
+  },
+  {
+    question: "What is 100 divided by 4?",
+    answers: ["20", "25", "40", "50"],
+    correct: "25",
+  },
+  {
+    question: "Which gas do plants absorb?",
+    answers: ["Oxygen", "Carbon dioxide", "Hydrogen", "Helium"],
+    correct: "Carbon dioxide",
+  },
+];
+
+// ========================================
+// GAME STATE
+// ========================================
+
+let imposterGameState = null;
+let imposterLocalRole = null;
+let imposterLocalPlayerId = null;
+let imposterGameIsHost = false;
+
+let imposterLocalTasks = [];
+let imposterPrivateTasks = {};
+let imposterCurrentTask = null;
+
+let imposterUnlocked = false;
+let imposterQuestionsAnswered = 0;
+let imposterCurrentUnlockQuestion = 0;
+
+let imposterGameRunning = false;
+let imposterKeys = {};
+let imposterLastBroadcast = 0;
+let imposterAnimationFrame = null;
+
+let imposterGamePage = null;
+let imposterCanvas = null;
+let imposterContext = null;
+
+let imposterTaskPanel = null;
+let imposterUnlockPanel = null;
+let imposterResultPanel = null;
+let imposterMeetingPanel = null;
+
+let imposterNetworkReady = false;
+let imposterHostNetworkWrapped = false;
+
+let imposterSpectating = false;
+let imposterSpectateIndex = 0;
+
+let imposterDiscussionSeconds = MEETING_DISCUSSION_DEFAULT;
+
+// ========================================
+// MAP
+// ========================================
+
+const IMPOSTER_WALLS = [
+  { x: 0, y: 0, w: MAP_PIXEL_WIDTH, h: 16 },
+  { x: 0, y: MAP_PIXEL_HEIGHT - 16, w: MAP_PIXEL_WIDTH, h: 16 },
+  { x: 0, y: 0, w: 16, h: MAP_PIXEL_HEIGHT },
+  { x: MAP_PIXEL_WIDTH - 16, y: 0, w: 16, h: MAP_PIXEL_HEIGHT },
+
+  { x: 320, y: 16, w: 12, h: 105 },
+  { x: 320, y: 170, w: 12, h: 134 },
+
+  { x: 640, y: 16, w: 12, h: 105 },
+  { x: 640, y: 170, w: 12, h: 134 },
+
+  { x: 320, y: 400, w: 12, h: 115 },
+  { x: 320, y: 565, w: 12, h: 123 },
+
+  { x: 640, y: 400, w: 12, h: 115 },
+  { x: 640, y: 565, w: 12, h: 123 },
+
+  { x: 16, y: 304, w: 270, h: 12 },
+  { x: 345, y: 304, w: 270, h: 12 },
+  { x: 674, y: 304, w: 270, h: 12 },
+
+  { x: 16, y: 388, w: 270, h: 12 },
+  { x: 345, y: 388, w: 270, h: 12 },
+  { x: 674, y: 388, w: 270, h: 12 },
+];
+
+const IMPOSTER_ROOMS = [
+  { name: "CAFETERIA", x: 16, y: 16, w: 304, h: 288 },
+  { name: "ENGINE", x: 332, y: 16, w: 308, h: 288 },
+  { name: "SECURITY", x: 652, y: 16, w: 292, h: 288 },
+  { name: "STORAGE", x: 16, y: 400, w: 304, h: 288 },
+  { name: "ADMIN", x: 332, y: 400, w: 308, h: 288 },
+  { name: "REACTOR", x: 652, y: 400, w: 292, h: 288 },
+];
+
+// ========================================
+// HELPERS
+// ========================================
+
+function shuffleImposterArray(array) {
+  const result = [...array];
+
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+
+  return result;
+}
+
+function createRandomImposterTasks(count = IMPOSTER_DEFAULT_TASK_COUNT) {
+  return shuffleImposterArray(IMPOSTER_TASKS)
+    .slice(0, Math.min(count, IMPOSTER_TASKS.length))
+    .map((task) => ({
+      id: task.id,
+      completed: false,
+    }));
+}
+
+function getImposterLocalPlayer() {
+  if (!imposterGameState) return null;
+
+  return (
+    imposterGameState.players.find(
+      (player) => player.id === imposterLocalPlayerId,
+    ) || null
+  );
+}
+
+function getImposterPlayerColor(index) {
+  const colors = [
+    "#ef4444",
+    "#3b82f6",
+    "#22c55e",
+    "#eab308",
+    "#a855f7",
+    "#f97316",
+    "#ec4899",
+    "#06b6d4",
+    "#f59e0b",
+    "#14b8a6",
+    "#8b5cf6",
+    "#f43f5e",
+  ];
+
+  return colors[index % colors.length];
+}
+
+function getImposterCountForPlayers(count) {
+  if (count >= 10) return 3;
+  if (count >= 7) return 2;
+  return 1;
+}
+
+function getImposterTotalTasks() {
+  return Object.values(imposterPrivateTasks).reduce(
+    (total, tasks) => total + tasks.length,
+    0,
+  );
+}
+
+function getImposterCompletedTasks() {
+  return Object.values(imposterPrivateTasks).reduce(
+    (total, tasks) => total + tasks.filter((task) => task.completed).length,
+    0,
+  );
+}
+
+function getImposterLivingPlayers() {
+  if (!imposterGameState) return [];
+
+  return imposterGameState.players.filter((player) => !player.eliminated);
+}
+
+function getImposterLivingCrew() {
+  if (!imposterGameState) return [];
+
+  return imposterGameState.players.filter(
+    (player) => player.role === "crewmate" && !player.eliminated,
+  );
+}
+
+function getImposterLivingImposters() {
+  if (!imposterGameState) return [];
+
+  return imposterGameState.players.filter(
+    (player) => player.role === "imposter" && !player.eliminated,
+  );
+}
+
+function escapeImposterText(value) {
+  return String(value || "Player").replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      })[character],
+  );
+}
+
+// ========================================
+// COLLISION AND MOVEMENT
+// ========================================
+
+function imposterCircleHitsWall(x, y) {
+  for (const wall of IMPOSTER_WALLS) {
+    const closestX = Math.max(wall.x, Math.min(x, wall.x + wall.w));
+    const closestY = Math.max(wall.y, Math.min(y, wall.y + wall.h));
+
+    const dx = x - closestX;
+    const dy = y - closestY;
+
+    if (dx * dx + dy * dy < PLAYER_RADIUS * PLAYER_RADIUS) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function moveImposterPlayer(player, dx, dy) {
+  if (!player) return;
+
+  // Ghosts can pass through walls.
+  if (player.eliminated) {
+    player.x += dx;
+    player.y += dy;
+  } else {
+    const nextX = player.x + dx;
+    const nextY = player.y + dy;
+
+    if (!imposterCircleHitsWall(nextX, player.y)) {
+      player.x = nextX;
+    }
+
+    if (!imposterCircleHitsWall(player.x, nextY)) {
+      player.y = nextY;
+    }
+  }
+
+  player.x = Math.max(
+    PLAYER_RADIUS + 16,
+    Math.min(MAP_PIXEL_WIDTH - PLAYER_RADIUS - 16, player.x),
+  );
+
+  player.y = Math.max(
+    PLAYER_RADIUS + 16,
+    Math.min(MAP_PIXEL_HEIGHT - PLAYER_RADIUS - 16, player.y),
+  );
+}
+
+// ========================================
+// CREATE GAME PAGE
+// ========================================
+
+function createImposterGamePage() {
+  if (document.getElementById("imposter-game-page")) {
+    imposterGamePage = document.getElementById("imposter-game-page");
+    imposterCanvas = document.getElementById("imposter-map");
+    imposterContext = imposterCanvas.getContext("2d");
+    return;
+  }
+
+  const page = document.createElement("div");
+
+  page.id = "imposter-game-page";
+
+  page.style.cssText = `
+    position:fixed;
+    inset:0;
+    z-index:9000;
+    background:#101827;
+    color:white;
+    display:none;
+    flex-direction:column;
+    align-items:center;
+    overflow:auto;
+    padding:14px;
+    box-sizing:border-box;
+    font-family:Arial,sans-serif;
+  `;
+
+  page.innerHTML = `
+    <div style="
+      width:100%;
+      max-width:960px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+    ">
+      <div>
+        <h1 style="margin:0;color:#f8fafc;">IMPOSTERS</h1>
+        <p id="imposter-role-label" style="margin:5px 0;color:#cbd5e1;">
+          Loading role...
+        </p>
+      </div>
+
+      <div style="text-align:right;">
+        <strong id="imposter-player-count">Players: 0</strong>
+        <p id="imposter-objective" style="margin:5px 0;color:#cbd5e1;">
+          Complete your objectives!
+        </p>
+      </div>
+    </div>
+
+    <div style="
+      width:100%;
+      max-width:960px;
+      background:#1e293b;
+      border-radius:12px;
+      padding:8px;
+      box-sizing:border-box;
+      overflow:hidden;
+    ">
+      <canvas
+        id="imposter-map"
+        width="${MAP_PIXEL_WIDTH}"
+        height="${MAP_PIXEL_HEIGHT}"
+        style="
+          width:100%;
+          height:auto;
+          display:block;
+          border-radius:8px;
+          background:#26364b;
+        "
+      ></canvas>
+    </div>
+
+    <div style="
+      width:100%;
+      max-width:960px;
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:center;
+      margin-top:12px;
+    ">
+      <button id="imposter-report-button" style="
+        padding:11px 18px;
+        border:0;
+        border-radius:9px;
+        background:#dc2626;
+        color:white;
+        font-weight:bold;
+        cursor:pointer;
+      ">REPORT BODY</button>
+
+      <button id="imposter-emergency-button" style="
+        padding:11px 18px;
+        border:0;
+        border-radius:9px;
+        background:#eab308;
+        color:#111827;
+        font-weight:bold;
+        cursor:pointer;
+      ">EMERGENCY MEETING</button>
+
+      <button id="imposter-spectate-button" style="
+        display:none;
+        padding:11px 18px;
+        border:0;
+        border-radius:9px;
+        background:#06b6d4;
+        color:#082f49;
+        font-weight:bold;
+        cursor:pointer;
+      ">SPECTATE</button>
+    </div>
+
+    <div id="imposter-spectate-controls" style="
+      display:none;
+      margin-top:8px;
+      text-align:center;
+    ">
+      <button id="imposter-spectate-previous">◀ Previous</button>
+      <span id="imposter-spectate-name" style="margin:0 12px;">
+        Spectating
+      </span>
+      <button id="imposter-spectate-next">Next ▶</button>
+    </div>
+
+    <div style="
+      width:100%;
+      max-width:960px;
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-top:12px;
+      color:#cbd5e1;
+      font-size:13px;
+    ">
+      <span>WASD / Arrow Keys: Move</span>
+      <span>E: Interact</span>
+      <span>Q: Imposter action</span>
+      <span>R: Report nearby body</span>
+    </div>
+
+    <div id="imposter-player-list" style="
+      width:100%;
+      max-width:960px;
+      margin-top:12px;
+      background:#1e293b;
+      border-radius:12px;
+      padding:12px;
+      box-sizing:border-box;
+    "></div>
+
+    <div id="imposter-host-meeting-settings" style="
+      display:none;
+      width:100%;
+      max-width:960px;
+      margin-top:10px;
+      color:#cbd5e1;
+    ">
+      <label>
+        Discussion time (seconds):
+        <input id="imposter-discussion-setting"
+          type="number" min="15" max="180" value="60"
+          style="width:65px;padding:5px;">
+      </label>
+      <button id="imposter-save-meeting-setting">Save</button>
+    </div>
+  `;
+
+  document.body.appendChild(page);
+
+  imposterGamePage = page;
+  imposterCanvas = document.getElementById("imposter-map");
+  imposterContext = imposterCanvas.getContext("2d");
+
+  createImposterTaskInterface();
+  createImposterUnlockInterface();
+  createImposterResultInterface();
+  createImposterMeetingInterface();
+
+  document
+    .getElementById("imposter-report-button")
+    .addEventListener("click", reportNearbyImposterBody);
+
+  document
+    .getElementById("imposter-emergency-button")
+    .addEventListener("click", requestImposterEmergencyMeeting);
+
+  document
+    .getElementById("imposter-spectate-button")
+    .addEventListener("click", toggleImposterSpectating);
+
+  document
+    .getElementById("imposter-spectate-previous")
+    .addEventListener("click", () => changeImposterSpectateTarget(-1));
+
+  document
+    .getElementById("imposter-spectate-next")
+    .addEventListener("click", () => changeImposterSpectateTarget(1));
+
+  document
+    .getElementById("imposter-save-meeting-setting")
+    .addEventListener("click", () => {
+      if (!imposterGameIsHost) return;
+
+      const input = document.getElementById("imposter-discussion-setting");
+      const seconds = Number(input.value);
+
+      if (!Number.isFinite(seconds)) return;
+
+      imposterDiscussionSeconds = Math.max(15, Math.min(180, seconds));
+
+      input.value = imposterDiscussionSeconds;
+      showImposterMessage(
+        `Discussion time set to ${imposterDiscussionSeconds} seconds.`,
+      );
+    });
+}
+
+function showImposterGamePage() {
+  createImposterGamePage();
+
+  imposterGamePage.style.display = "flex";
+
+  [
+    "packs-page",
+    "collection-page",
+    "play-page",
+    "host-page",
+    "lobby-page",
+  ].forEach((id) => {
+    const element = document.getElementById(id);
+
+    if (element) element.style.display = "none";
+  });
+}
+
+// ========================================
+// TASK INTERFACE
+// ========================================
+
+function createImposterTaskInterface() {
+  if (document.getElementById("imposter-task-panel")) {
+    imposterTaskPanel = document.getElementById("imposter-task-panel");
+    return;
+  }
+
+  const panel = document.createElement("div");
+
+  panel.id = "imposter-task-panel";
+
+  panel.style.cssText = `
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:10001;
+    background:rgba(0,0,0,0.8);
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  `;
+
+  panel.innerHTML = `
+    <div style="
+      background:white;
+      color:#111827;
+      width:100%;
+      max-width:430px;
+      padding:25px;
+      border-radius:18px;
+      text-align:center;
+      box-sizing:border-box;
+    ">
+      <h2 id="imposter-task-title">Task</h2>
+      <p id="imposter-task-question"></p>
+      <div id="imposter-task-answers" style="
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:10px;
+        margin-top:20px;
+      "></div>
+      <p id="imposter-task-feedback"></p>
+      <button id="imposter-task-close" style="
+        padding:10px 20px;
+        border:0;
+        border-radius:9px;
+        background:#64748b;
+        color:white;
+        cursor:pointer;
+      ">Close</button>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  document
+    .getElementById("imposter-task-close")
+    .addEventListener("click", closeImposterTask);
+
+  imposterTaskPanel = panel;
+}
+
+function openImposterTask(task) {
+  if (imposterLocalRole !== "crewmate") return;
+  if (!task || task.completed) return;
+  if (imposterGameState?.meeting?.active) return;
+
+  const definition = IMPOSTER_TASKS.find((item) => item.id === task.id);
+
+  if (!definition) return;
+
+  imposterCurrentTask = definition;
+
+  createImposterTaskInterface();
+
+  document.getElementById("imposter-task-title").textContent = definition.name;
+
+  document.getElementById("imposter-task-question").textContent =
+    definition.question;
+
+  document.getElementById("imposter-task-feedback").textContent = "";
+
+  const answers = document.getElementById("imposter-task-answers");
+  answers.innerHTML = "";
+
+  definition.answers.forEach((answer) => {
+    const button = document.createElement("button");
+
+    button.textContent = answer;
+    button.style.cssText = `
+      padding:13px;
+      border:0;
+      border-radius:10px;
+      background:#e2e8f0;
+      cursor:pointer;
+      font-weight:bold;
+    `;
+
+    button.addEventListener("click", () => {
+      submitImposterTaskAnswer(definition.id, answer);
+    });
+
+    answers.appendChild(button);
+  });
+
+  imposterTaskPanel.style.display = "flex";
+}
+
+function closeImposterTask() {
+  if (imposterTaskPanel) {
+    imposterTaskPanel.style.display = "none";
+  }
+
+  imposterCurrentTask = null;
+}
+
+function submitImposterTaskAnswer(taskId, answer) {
+  if (!imposterCurrentTask || !imposterGameState) return;
+
+  const feedback = document.getElementById("imposter-task-feedback");
+
+  if (imposterGameIsHost) {
+    const result = completeImposterTask(imposterLocalPlayerId, taskId, answer);
+
+    if (result.success) {
+      feedback.textContent = "Correct! Task completed!";
+      feedback.style.color = "#16a34a";
+      setTimeout(closeImposterTask, 700);
+    } else {
+      feedback.textContent = result.message;
+      feedback.style.color = "#dc2626";
+    }
+
+    return;
+  }
+
+  if (!myConnection || !myConnection.open) {
+    feedback.textContent = "Connection lost. Try again.";
+    return;
+  }
+
+  myConnection.send({
+    type: "imposter-task-answer",
+    taskId,
+    answer,
+  });
+
+  feedback.textContent = "Checking answer...";
+
+  document
+    .querySelectorAll("#imposter-task-answers button")
+    .forEach((button) => {
+      button.disabled = true;
+    });
+}
+
+// ========================================
+// TASK VALIDATION
+// ========================================
+
+function completeImposterTask(playerId, taskId, answer) {
+  if (!imposterGameIsHost || !imposterGameState) {
+    return { success: false, message: "Game unavailable." };
+  }
+
+  if (!imposterGameState.running) {
+    return { success: false, message: "The game has ended." };
+  }
+
+  if (imposterGameState.meeting?.active) {
+    return { success: false, message: "Tasks are paused during meetings." };
+  }
+
+  const player = imposterGameState.players.find((item) => item.id === playerId);
+
+  if (!player) {
+    return { success: false, message: "Player unavailable." };
+  }
+
+  // Ghost Crewmates are allowed to finish their tasks.
+  if (player.role !== "crewmate") {
+    return {
+      success: false,
+      message: "Imposters cannot complete crew tasks.",
+    };
+  }
+
+  const definition = IMPOSTER_TASKS.find((task) => task.id === taskId);
+
+  if (!definition) {
+    return { success: false, message: "Task not found." };
+  }
+
+  const assignedTasks = imposterPrivateTasks[playerId];
+
+  if (!assignedTasks) {
+    return { success: false, message: "No tasks assigned." };
+  }
+
+  const assignedTask = assignedTasks.find((task) => task.id === taskId);
+
+  if (!assignedTask || assignedTask.completed) {
+    return { success: false, message: "Task already completed." };
+  }
+
+  if (answer !== definition.correct) {
+    sendImposterTaskResult(playerId, {
+      success: false,
+      taskId,
+      message: "Incorrect answer. Try again!",
+    });
+
+    return { success: false, message: "Incorrect answer. Try again!" };
+  }
+
+  assignedTask.completed = true;
+
+  player.tasksCompleted = assignedTasks.filter((task) => task.completed).length;
+
+  broadcastImposterState();
+
+  sendImposterTaskResult(playerId, {
+    success: true,
+    taskId,
+  });
+
+  checkImposterWinConditions();
+
+  return { success: true };
+}
+
+function sendImposterTaskResult(playerId, result) {
+  if (playerId === "host") {
+    receiveImposterTaskResult(result);
+    return;
+  }
+
+  const connection = hostConnections.get(playerId);
+
+  if (connection && connection.open) {
+    connection.send({
+      type: "imposter-task-result",
+      ...result,
+    });
+  }
+}
+
+function receiveImposterTaskResult(data) {
+  if (!data) return;
+
+  const feedback = document.getElementById("imposter-task-feedback");
+
+  if (!data.success) {
+    if (feedback) {
+      feedback.textContent = data.message || "Incorrect answer!";
+      feedback.style.color = "#dc2626";
+    }
+
+    document
+      .querySelectorAll("#imposter-task-answers button")
+      .forEach((button) => {
+        button.disabled = false;
+      });
+
+    return;
+  }
+
+  const task = imposterLocalTasks.find((item) => item.id === data.taskId);
+
+  if (task) task.completed = true;
+
+  if (feedback) {
+    feedback.textContent = "Correct! Task completed!";
+    feedback.style.color = "#16a34a";
+  }
+
+  renderImposterTaskProgress();
+
+  setTimeout(closeImposterTask, 700);
+}
+
+// ========================================
+// NEARBY TASKS
+// ========================================
+
+function findNearbyImposterTask() {
+  const player = getImposterLocalPlayer();
+
+  if (!player || imposterLocalRole !== "crewmate") return null;
+
+  let nearest = null;
+  let nearestDistance = IMPOSTER_TASK_DISTANCE;
+
+  imposterLocalTasks.forEach((task) => {
+    if (task.completed) return;
+
+    const definition = IMPOSTER_TASKS.find((item) => item.id === task.id);
+
+    if (!definition) return;
+
+    const distance = Math.hypot(
+      player.x - definition.x,
+      player.y - definition.y,
+    );
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = task;
+    }
+  });
+
+  return nearest;
+}
+
+// ========================================
+// IMPOSTER UNLOCK INTERFACE
+// ========================================
+
+function createImposterUnlockInterface() {
+  if (document.getElementById("imposter-unlock-panel")) {
+    imposterUnlockPanel = document.getElementById("imposter-unlock-panel");
+    return;
+  }
+
+  const panel = document.createElement("div");
+
+  panel.id = "imposter-unlock-panel";
+
+  panel.style.cssText = `
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:10002;
+    background:rgba(0,0,0,0.85);
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  `;
+
+  panel.innerHTML = `
+    <div style="
+      background:#1e293b;
+      color:white;
+      width:100%;
+      max-width:430px;
+      padding:25px;
+      border-radius:18px;
+      text-align:center;
+      box-sizing:border-box;
+    ">
+      <h2>Imposter Terminal</h2>
+      <p id="imposter-unlock-progress">
+        Answer 5 questions to unlock your action.
+      </p>
+      <p id="imposter-unlock-question"></p>
+      <div id="imposter-unlock-answers" style="
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:10px;
+      "></div>
+      <p id="imposter-unlock-feedback"></p>
+      <button id="imposter-unlock-close" style="
+        padding:10px 20px;
+        border:0;
+        border-radius:9px;
+        background:#64748b;
+        color:white;
+        cursor:pointer;
+      ">Close</button>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  document
+    .getElementById("imposter-unlock-close")
+    .addEventListener("click", () => {
+      panel.style.display = "none";
+    });
+
+  imposterUnlockPanel = panel;
+}
+
+function openImposterUnlock() {
+  if (imposterLocalRole !== "imposter") return;
+  if (imposterUnlocked) return;
+  if (imposterGameState?.meeting?.active) return;
+
+  createImposterUnlockInterface();
+
+  showImposterUnlockQuestion();
+
+  imposterUnlockPanel.style.display = "flex";
+}
+
+function showImposterUnlockQuestion() {
+  const question = IMPOSTER_UNLOCK_QUESTIONS[imposterCurrentUnlockQuestion];
+
+  if (!question) return;
+
+  document.getElementById("imposter-unlock-progress").textContent =
+    `Question ${imposterCurrentUnlockQuestion + 1} of 5`;
+
+  document.getElementById("imposter-unlock-question").textContent =
+    question.question;
+
+  document.getElementById("imposter-unlock-feedback").textContent = "";
+
+  const answers = document.getElementById("imposter-unlock-answers");
+  answers.innerHTML = "";
+
+  question.answers.forEach((answer) => {
+    const button = document.createElement("button");
+
+    button.textContent = answer;
+
+    button.style.cssText = `
+      padding:13px;
+      border:0;
+      border-radius:10px;
+      background:#334155;
+      color:white;
+      cursor:pointer;
+      font-weight:bold;
+    `;
+
+    button.addEventListener("click", () => {
+      answerImposterUnlockQuestion(answer);
+    });
+
+    answers.appendChild(button);
+  });
+}
+
+function answerImposterUnlockQuestion(answer) {
+  if (imposterUnlocked) return;
+
+  const question = IMPOSTER_UNLOCK_QUESTIONS[imposterCurrentUnlockQuestion];
+
+  if (!question) return;
+
+  const feedback = document.getElementById("imposter-unlock-feedback");
+
+  if (answer !== question.correct) {
+    feedback.textContent = "Incorrect! Try that question again.";
+    feedback.style.color = "#f87171";
+    return;
+  }
+
+  imposterCurrentUnlockQuestion++;
+  imposterQuestionsAnswered = imposterCurrentUnlockQuestion;
+
+  if (imposterCurrentUnlockQuestion >= 5) {
+    if (imposterGameIsHost) {
+      const player = getImposterLocalPlayer();
+
+      if (player) {
+        player.unlocked = true;
+        imposterUnlocked = true;
+      }
+    } else if (myConnection && myConnection.open) {
+      myConnection.send({
+        type: "imposter-unlock",
+      });
+    } else {
+      feedback.textContent = "Connection lost. Try again.";
+      feedback.style.color = "#f87171";
+      return;
+    }
+
+    feedback.textContent = "Unlocked! You can now use Q near a crewmate.";
+
+    feedback.style.color = "#4ade80";
+
+    renderImposterTaskProgress();
+
+    setTimeout(() => {
+      imposterUnlockPanel.style.display = "none";
+    }, 1200);
+
+    return;
+  }
+
+  showImposterUnlockQuestion();
+}
+
+// ========================================
+// IMPOSTER ACTION + COOLDOWN
+// ========================================
+
+function getImposterCooldownRemaining(player) {
+  if (!player || !player.lastKillAt) return 0;
+
+  return Math.max(0, IMPOSTER_KILL_COOLDOWN - (Date.now() - player.lastKillAt));
+}
+
+function formatImposterCooldown(milliseconds) {
+  return (milliseconds / 1000).toFixed(1);
+}
+
+function tryImposterAction() {
+  if (imposterLocalRole !== "imposter") return;
+  if (!imposterUnlocked) return;
+  if (!imposterGameRunning) return;
+  if (imposterGameState?.meeting?.active) return;
+
+  const player = getImposterLocalPlayer();
+
+  if (!player || player.eliminated) return;
+
+  const remaining = getImposterCooldownRemaining(player);
+
+  if (remaining > 0) {
+    showImposterMessage(
+      `Action ready in ${formatImposterCooldown(remaining)}s`,
+    );
+    return;
+  }
+
+  const nearby = imposterGameState.players.find((target) => {
+    if (target.id === player.id || target.eliminated) return false;
+
+    return (
+      Math.hypot(player.x - target.x, player.y - target.y) <
+      IMPOSTER_KILL_DISTANCE
+    );
+  });
+
+  if (!nearby) {
+    showImposterMessage("No players nearby.");
+    return;
+  }
+
+  if (imposterGameIsHost) {
+    const result = eliminateImposterPlayer(imposterLocalPlayerId, nearby.id);
+
+    if (!result.success) showImposterMessage(result.message);
+  } else if (myConnection && myConnection.open) {
+    myConnection.send({
+      type: "imposter-eliminate",
+      targetId: nearby.id,
+    });
+  }
+}
+
+function eliminateImposterPlayer(imposterId, targetId) {
+  if (!imposterGameIsHost || !imposterGameState) {
+    return { success: false, message: "Game unavailable." };
+  }
+
+  if (!imposterGameState.running || imposterGameState.meeting?.active) {
+    return { success: false, message: "Actions are unavailable." };
+  }
+
+  const imposter = imposterGameState.players.find(
+    (player) => player.id === imposterId,
+  );
+
+  const target = imposterGameState.players.find(
+    (player) => player.id === targetId,
+  );
+
+  if (!imposter || !target) {
+    return { success: false, message: "Player not found." };
+  }
+
+  if (imposter.role !== "imposter") {
+    return { success: false, message: "You are not an Imposter." };
+  }
+
+  if (!imposter.unlocked) {
+    return { success: false, message: "Unlock your action first." };
+  }
+
+  if (imposter.eliminated || target.eliminated) {
+    return { success: false, message: "That player is unavailable." };
+  }
+
+  if (target.role !== "crewmate") {
+    return {
+      success: false,
+      message: "You cannot target another Imposter.",
+    };
+  }
+
+  const remaining = getImposterCooldownRemaining(imposter);
+
+  if (remaining > 0) {
+    return {
+      success: false,
+      message: `Wait ${formatImposterCooldown(remaining)} seconds.`,
+    };
+  }
+
+  const distance = Math.hypot(imposter.x - target.x, imposter.y - target.y);
+
+  if (distance > IMPOSTER_KILL_DISTANCE) {
+    return { success: false, message: "That player is too far away." };
+  }
+
+  target.eliminated = true;
+  target.bodyReported = false;
+
+  imposterGameState.bodies.push({
+    playerId: target.id,
+    x: target.x,
+    y: target.y,
+    reported: false,
+  });
+
+  imposter.lastKillAt = Date.now();
+
+  broadcastImposterState();
+  checkImposterWinConditions();
+
+  return { success: true };
+}
+
+// ========================================
+// MESSAGE DISPLAY
+// ========================================
+
+function showImposterMessage(message) {
+  let element = document.getElementById("imposter-message");
+
+  if (!element) {
+    element = document.createElement("div");
+    element.id = "imposter-message";
+
+    element.style.cssText = `
+      position:fixed;
+      bottom:55px;
+      left:50%;
+      transform:translateX(-50%);
+      z-index:10010;
+      background:#0f172a;
+      color:white;
+      padding:12px 20px;
+      border-radius:10px;
+      pointer-events:none;
+    `;
+
+    document.body.appendChild(element);
+  }
+
+  element.textContent = message;
+  element.style.display = "block";
+
+  clearTimeout(element.hideTimer);
+
+  element.hideTimer = setTimeout(() => {
+    element.style.display = "none";
+  }, 2200);
+}
+
+// ========================================
+// TASK STATIONS
+// ========================================
+
+function drawImposterTaskStations(ctx) {
+  if (imposterLocalRole !== "crewmate") return;
+
+  IMPOSTER_TASKS.forEach((definition) => {
+    const assigned = imposterLocalTasks.find(
+      (task) => task.id === definition.id,
+    );
+
+    if (!assigned || assigned.completed) return;
+
+    ctx.beginPath();
+    ctx.arc(definition.x, definition.y, 11, 0, Math.PI * 2);
+
+    ctx.fillStyle = imposterLocalPlayerIsGhost() ? "#67e8f9" : "#facc15";
+    ctx.fill();
+
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = "#111827";
+    ctx.font = "bold 12px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("E", definition.x, definition.y + 4);
+  });
+}
+
+function imposterLocalPlayerIsGhost() {
+  const player = getImposterLocalPlayer();
+  return Boolean(player?.eliminated);
+}
+
+// ========================================
+// MAP DRAWING
+// ========================================
+
+function drawImposterMap(ctx) {
+  if (!ctx) return;
+
+  ctx.clearRect(0, 0, MAP_PIXEL_WIDTH, MAP_PIXEL_HEIGHT);
+
+  let cameraTarget = null;
+
+  if (imposterSpectating && imposterLocalPlayerIsGhost()) {
+    const living = getImposterLivingPlayers();
+
+    if (living.length) {
+      imposterSpectateIndex =
+        ((imposterSpectateIndex % living.length) + living.length) %
+        living.length;
+
+      cameraTarget = living[imposterSpectateIndex];
+    }
+  }
+
+  ctx.save();
+
+  if (cameraTarget) {
+    ctx.translate(
+      MAP_PIXEL_WIDTH / 2 - cameraTarget.x,
+      MAP_PIXEL_HEIGHT / 2 - cameraTarget.y,
+    );
+  }
+
+  ctx.fillStyle = "#26364b";
+  ctx.fillRect(0, 0, MAP_PIXEL_WIDTH, MAP_PIXEL_HEIGHT);
+
+  IMPOSTER_ROOMS.forEach((room) => {
+    ctx.fillStyle = "#34475e";
+    ctx.fillRect(room.x, room.y, room.w, room.h);
+
+    ctx.strokeStyle = "#52677e";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(room.x, room.y, room.w, room.h);
+
+    ctx.fillStyle = "#9fb2c8";
+    ctx.font = "bold 15px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(room.name, room.x + room.w / 2, room.y + 30);
+  });
+
+  ctx.fillStyle = "#40546b";
+  ctx.fillRect(16, 316, MAP_PIXEL_WIDTH - 32, 72);
+
+  ctx.fillStyle = "#dbeafe";
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("MAIN CORRIDOR", MAP_PIXEL_WIDTH / 2, 358);
+
+  IMPOSTER_WALLS.forEach((wall) => {
+    ctx.fillStyle = "#718096";
+    ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+
+    ctx.strokeStyle = "#94a3b8";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+  });
+
+  drawImposterTaskStations(ctx);
+
+  // Imposter terminal.
+  if (imposterLocalRole === "imposter" && !imposterUnlocked) {
+    ctx.fillStyle = "#a855f7";
+    ctx.fillRect(465, 337, 30, 30);
+
+    ctx.fillStyle = "white";
+    ctx.font = "bold 12px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("E", 480, 356);
+  }
+
+  if (imposterGameState) {
+    // Bodies are visible to living players and ghosts.
+    (imposterGameState.bodies || []).forEach((body) => {
+      if (body.reported) return;
+
+      ctx.fillStyle = "#991b1b";
+      ctx.beginPath();
+      ctx.arc(body.x, body.y, 10, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "#fecaca";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = "white";
+      ctx.font = "bold 10px Arial";
+      ctx.fillText("!", body.x, body.y - 15);
+    });
+
+    imposterGameState.players.forEach((player) => {
+      const isGhost = Boolean(player.eliminated);
+
+      // Living players never see ghosts.
+      if (isGhost && !imposterLocalPlayerIsGhost()) return;
+
+      // Ghosts see living players anonymously.
+      const anonymous = imposterLocalPlayerIsGhost() && !isGhost;
+
+      ctx.save();
+
+      if (isGhost) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = "#67e8f9";
+      } else if (anonymous) {
+        ctx.fillStyle = "#cbd5e1";
+      } else {
+        ctx.fillStyle = player.color || "#3b82f6";
+      }
+
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = isGhost ? "#a5f3fc" : "white";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      ctx.fillStyle = isGhost ? "#ecfeff" : "#bae6fd";
+      ctx.fillRect(player.x - 7, player.y - 5, 14, 7);
+
+      // Selected spectate target gets a ring.
+      if (cameraTarget && cameraTarget.id === player.id) {
+        ctx.beginPath();
+        ctx.arc(player.x, player.y, 23, 0, Math.PI * 2);
+        ctx.strokeStyle = "#22d3ee";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+
+      // No names are shown to ghosts.
+      if (!anonymous && !isGhost) {
+        ctx.fillStyle = "white";
+        ctx.font = "11px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(player.name || "Player", player.x, player.y - 20);
+      }
+
+      ctx.restore();
+    });
+  }
+
+  ctx.restore();
+}
+
+// ========================================
+// TASK PROGRESS
+// ========================================
+
+function renderImposterTaskProgress() {
+  const objective = document.getElementById("imposter-objective");
+
+  if (!objective) return;
+
+  if (imposterLocalRole === "crewmate") {
+    const completed = imposterLocalTasks.filter(
+      (task) => task.completed,
+    ).length;
+
+    const ghost = imposterLocalPlayerIsGhost();
+
+    objective.innerHTML = `
+      <strong>${ghost ? "Ghost Tasks" : "Crewmate Tasks"}</strong><br>
+      ${completed} / ${imposterLocalTasks.length} completed
+      ${ghost ? "<br>Finish your remaining tasks!" : ""}
+    `;
+  } else if (imposterLocalRole === "imposter") {
+    const player = getImposterLocalPlayer();
+    const remaining = getImposterCooldownRemaining(player);
+
+    if (imposterUnlocked && remaining > 0) {
+      objective.innerHTML = `
+        <strong>Imposter action unlocked!</strong><br>
+        Cooldown: ${formatImposterCooldown(remaining)}s
+      `;
+    } else if (imposterUnlocked) {
+      objective.innerHTML = `
+        <strong>Imposter action ready!</strong><br>
+        Press Q near a crewmate.
+      `;
+    } else {
+      objective.innerHTML = `
+        <strong>Unlock your action</strong><br>
+        ${imposterQuestionsAnswered} / 5 questions
+      `;
+    }
+  }
+}
+
+// ========================================
+// PLAYER LIST
+// ========================================
+
+function renderImposterPlayerList() {
+  const list = document.getElementById("imposter-player-list");
+
+  if (!list || !imposterGameState) return;
+
+  const ghost = imposterLocalPlayerIsGhost();
+
+  const visiblePlayers = ghost
+    ? imposterGameState.players.filter((player) => !player.eliminated)
+    : imposterGameState.players;
+
+  list.innerHTML = `
+    <strong>${ghost ? "Living Players (Anonymous)" : "Players"}</strong>
+    <div style="
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      margin-top:10px;
+    ">
+      ${visiblePlayers
+        .map(
+          (player) => `
+        <div style="
+          background:#334155;
+          padding:8px 12px;
+          border-radius:8px;
+          opacity:${player.eliminated ? "0.45" : "1"};
+        ">
+          <span style="
+            display:inline-block;
+            width:10px;
+            height:10px;
+            border-radius:50%;
+            background:${ghost ? "#cbd5e1" : player.color};
+            margin-right:6px;
+          "></span>
+          ${ghost ? "Crewmate" : escapeImposterText(player.name)}
+          ${!ghost && player.eliminated ? "(Out)" : ""}
+        </div>
+      `,
+        )
+        .join("")}
+    </div>
+  `;
+
+  const count = document.getElementById("imposter-player-count");
+
+  if (count) {
+    count.textContent = `Players: ${getImposterLivingPlayers().length}`;
+  }
+}
+
+// ========================================
+// GHOST / SPECTATOR CONTROLS
+// ========================================
+
+function updateImposterGhostControls() {
+  const ghost = imposterLocalPlayerIsGhost();
+
+  const spectateButton = document.getElementById("imposter-spectate-button");
+
+  const controls = document.getElementById("imposter-spectate-controls");
+
+  if (!spectateButton || !controls) return;
+
+  spectateButton.style.display = ghost ? "inline-block" : "none";
+
+  controls.style.display = ghost && imposterSpectating ? "block" : "none";
+
+  spectateButton.textContent = imposterSpectating
+    ? "STOP SPECTATING"
+    : "SPECTATE";
+
+  if (ghost && imposterSpectating) {
+    const living = getImposterLivingPlayers();
+
+    const target = living[imposterSpectateIndex];
+
+    document.getElementById("imposter-spectate-name").textContent = target
+      ? `Watching: ${target.name || "Crewmate"}`
+      : "No players left";
+  }
+}
+
+function toggleImposterSpectating() {
+  if (!imposterLocalPlayerIsGhost()) return;
+
+  imposterSpectating = !imposterSpectating;
+
+  if (imposterSpectating) {
+    imposterKeys = {};
+    showImposterMessage("Spectating living players.");
+  } else {
+    showImposterMessage("Ghost movement enabled.");
+  }
+
+  updateImposterGhostControls();
+  renderImposterGame();
+}
+
+function changeImposterSpectateTarget(direction) {
+  if (!imposterSpectating) return;
+
+  const living = getImposterLivingPlayers();
+
+  if (!living.length) return;
+
+  imposterSpectateIndex =
+    (imposterSpectateIndex + direction + living.length) % living.length;
+
+  updateImposterGhostControls();
+  renderImposterGame();
+}
+
+// ========================================
+// MEETING INTERFACE
+// ========================================
+
+function createImposterMeetingInterface() {
+  if (document.getElementById("imposter-meeting-panel")) {
+    imposterMeetingPanel = document.getElementById("imposter-meeting-panel");
+    return;
+  }
+
+  const panel = document.createElement("div");
+
+  panel.id = "imposter-meeting-panel";
+
+  panel.style.cssText = `
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:10030;
+    background:rgba(2,6,23,0.96);
+    color:white;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+    overflow:auto;
+    font-family:Arial,sans-serif;
+  `;
+
+  panel.innerHTML = `
+    <div style="
+      width:100%;
+      max-width:650px;
+      background:#1e293b;
+      border-radius:18px;
+      padding:25px;
+      box-sizing:border-box;
+      text-align:center;
+    ">
+      <h1 id="imposter-meeting-title">EMERGENCY MEETING</h1>
+      <h2 id="imposter-meeting-phase">DISCUSSION</h2>
+      <p id="imposter-meeting-timer" style="
+        font-size:28px;
+        font-weight:bold;
+        color:#facc15;
+      ">60</p>
+      <p id="imposter-meeting-description">
+        Discuss what happened.
+      </p>
+
+      <div id="imposter-vote-options" style="
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:10px;
+        margin-top:20px;
+      "></div>
+
+      <p id="imposter-vote-status" style="color:#cbd5e1;"></p>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  imposterMeetingPanel = panel;
+}
+
+function openImposterMeetingInterface() {
+  createImposterMeetingInterface();
+
+  imposterMeetingPanel.style.display = "flex";
+
+  updateImposterMeetingInterface();
+}
+
+function updateImposterMeetingInterface() {
+  const meeting = imposterGameState?.meeting;
+
+  if (!meeting?.active) {
+    if (imposterMeetingPanel) {
+      imposterMeetingPanel.style.display = "none";
+    }
+
+    return;
+  }
+
+  createImposterMeetingInterface();
+
+  const phase = meeting.phase;
+
+  document.getElementById("imposter-meeting-title").textContent =
+    meeting.reason === "body" ? "BODY REPORTED!" : "EMERGENCY MEETING";
+
+  document.getElementById("imposter-meeting-phase").textContent =
+    phase.toUpperCase();
+
+  const remaining = Math.max(
+    0,
+    Math.ceil((meeting.endsAt - Date.now()) / 1000),
+  );
+
+  document.getElementById("imposter-meeting-timer").textContent =
+    `${remaining}s`;
+
+  document.getElementById("imposter-meeting-description").textContent =
+    phase === "discussion"
+      ? "Discuss what happened. Voting begins when the timer ends."
+      : phase === "revote"
+        ? "It's a tie! Vote again between the tied players."
+        : "Choose a player to eliminate, or skip your vote.";
+
+  const options = document.getElementById("imposter-vote-options");
+  const status = document.getElementById("imposter-vote-status");
+
+  options.innerHTML = "";
+
+  const localPlayer = getImposterLocalPlayer();
+
+  const canVote =
+    localPlayer && !localPlayer.eliminated && phase !== "discussion";
+
+  if (phase === "voting" || phase === "revote") {
+    const candidates = meeting.candidates || [];
+
+    candidates.forEach((candidateId) => {
+      const candidate = imposterGameState.players.find(
+        (player) => player.id === candidateId,
+      );
+
+      if (!candidate) return;
+
+      const button = document.createElement("button");
+
+      button.textContent = candidate.name || "Player";
+      button.disabled =
+        !canVote || Boolean(meeting.votes?.[imposterLocalPlayerId]);
+
+      button.style.cssText = `
+        padding:14px;
+        border:0;
+        border-radius:10px;
+        background:#475569;
+        color:white;
+        font-weight:bold;
+        cursor:pointer;
+      `;
+
+      button.addEventListener("click", () => {
+        submitImposterVote(candidateId);
+      });
+
+      options.appendChild(button);
+    });
+
+    const skip = document.createElement("button");
+
+    skip.textContent = "SKIP VOTE";
+    skip.disabled = !canVote || Boolean(meeting.votes?.[imposterLocalPlayerId]);
+
+    skip.style.cssText = `
+      padding:14px;
+      border:0;
+      border-radius:10px;
+      background:#64748b;
+      color:white;
+      font-weight:bold;
+      cursor:pointer;
+    `;
+
+    skip.addEventListener("click", () => {
+      submitImposterVote("skip");
+    });
+
+    options.appendChild(skip);
+
+    if (meeting.votes?.[imposterLocalPlayerId]) {
+      status.textContent = "Your vote has been submitted.";
+    } else if (localPlayer?.eliminated) {
+      status.textContent = "Ghosts cannot vote.";
+    } else {
+      status.textContent = "Your vote is private.";
+    }
+  } else {
+    status.textContent = "Discussion time. Get ready to vote!";
+  }
+
+  imposterMeetingPanel.style.display = "flex";
+}
+
+// ========================================
+// MEETING REQUESTS
+// ========================================
+
+function requestImposterEmergencyMeeting() {
+  if (!imposterGameRunning || !imposterGameState) return;
+
+  const player = getImposterLocalPlayer();
+
+  if (!player || player.eliminated) {
+    showImposterMessage("Ghosts cannot call meetings.");
+    return;
+  }
+
+  if (imposterGameState.meeting?.active) {
+    showImposterMessage("A meeting is already happening.");
+    return;
+  }
+
+  if (player.emergencyMeetingsUsed >= MEETING_EMERGENCY_LIMIT) {
+    showImposterMessage("You have used your emergency meeting.");
+    return;
+  }
+
+  if (imposterGameIsHost) {
+    startImposterMeeting("emergency", null, imposterLocalPlayerId);
+  } else if (myConnection && myConnection.open) {
+    myConnection.send({
+      type: "imposter-emergency-meeting",
+    });
+  }
+}
+
+function reportNearbyImposterBody() {
+  if (!imposterGameRunning || !imposterGameState) return;
+
+  const player = getImposterLocalPlayer();
+
+  if (!player || player.eliminated) {
+    showImposterMessage("Ghosts cannot report bodies.");
+    return;
+  }
+
+  if (imposterGameState.meeting?.active) return;
+
+  const bodies = (imposterGameState.bodies || []).filter(
+    (body) => !body.reported,
+  );
+
+  let nearest = null;
+  let nearestDistance = MEETING_REPORT_DISTANCE;
+
+  bodies.forEach((body) => {
+    const distance = Math.hypot(player.x - body.x, player.y - body.y);
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = body;
+    }
+  });
+
+  if (!nearest) {
+    showImposterMessage("No reportable bodies nearby.");
+    return;
+  }
+
+  if (imposterGameIsHost) {
+    startImposterMeeting("body", nearest.playerId, imposterLocalPlayerId);
+  } else if (myConnection && myConnection.open) {
+    myConnection.send({
+      type: "imposter-report-body",
+      bodyPlayerId: nearest.playerId,
+    });
+  }
+}
+
+// ========================================
+// MEETING HOST LOGIC
+// ========================================
+
+function startImposterMeeting(reason, bodyPlayerId, callerId) {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  if (!imposterGameState.running) return;
+  if (imposterGameState.meeting?.active) return;
+
+  const caller = imposterGameState.players.find(
+    (player) => player.id === callerId,
+  );
+
+  if (!caller || caller.eliminated) return;
+
+  if (reason === "emergency") {
+    if (caller.emergencyMeetingsUsed >= MEETING_EMERGENCY_LIMIT) {
+      return;
+    }
+
+    caller.emergencyMeetingsUsed++;
+  }
+
+  if (reason === "body") {
+    const body = imposterGameState.bodies.find(
+      (item) => item.playerId === bodyPlayerId && !item.reported,
+    );
+
+    if (!body) return;
+
+    const distance = Math.hypot(caller.x - body.x, caller.y - body.y);
+
+    if (distance > MEETING_REPORT_DISTANCE) return;
+
+    body.reported = true;
+  }
+
+  imposterGameState.meeting = {
+    active: true,
+    reason,
+    callerId,
+    bodyPlayerId,
+    phase: "discussion",
+    endsAt: Date.now() + imposterDiscussionSeconds * 1000,
+    candidates: [],
+    votes: {},
+    tiedCandidates: [],
+    round: 1,
+  };
+
+  imposterSpectating = false;
+  imposterKeys = {};
+
+  closeImposterTask();
+
+  if (imposterUnlockPanel) {
+    imposterUnlockPanel.style.display = "none";
+  }
+
+  broadcastImposterState();
+  openImposterMeetingInterface();
+
+  showImposterMessage("Meeting started!");
+}
+
+function beginImposterVoting() {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  const meeting = imposterGameState.meeting;
+
+  if (!meeting?.active) return;
+
+  meeting.phase = meeting.round > 1 ? "revote" : "voting";
+
+  meeting.endsAt =
+    Date.now() +
+    (meeting.round > 1 ? MEETING_REVOTE_SECONDS : MEETING_VOTING_SECONDS) *
+      1000;
+
+  meeting.votes = {};
+
+  meeting.candidates =
+    meeting.round > 1
+      ? [...meeting.tiedCandidates]
+      : getImposterLivingPlayers().map((player) => player.id);
+
+  broadcastImposterState();
+  updateImposterMeetingInterface();
+}
+
+function submitImposterVote(targetId) {
+  if (!imposterGameState?.meeting?.active) return;
+
+  const player = getImposterLocalPlayer();
+
+  if (!player || player.eliminated) return;
+
+  if (
+    imposterGameState.meeting.phase !== "voting" &&
+    imposterGameState.meeting.phase !== "revote"
+  ) {
+    return;
+  }
+
+  if (imposterGameState.meeting.votes?.[player.id]) {
+    return;
+  }
+
+  if (targetId !== "skip") {
+    const candidate = imposterGameState.meeting.candidates || [];
+
+    if (!candidate.includes(targetId)) return;
+  }
+
+  if (imposterGameIsHost) {
+    registerImposterVote(imposterLocalPlayerId, targetId);
+  } else if (myConnection && myConnection.open) {
+    myConnection.send({
+      type: "imposter-vote",
+      targetId,
+    });
+  }
+}
+
+function registerImposterVote(voterId, targetId) {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  const meeting = imposterGameState.meeting;
+
+  if (!meeting?.active) return;
+
+  if (meeting.phase !== "voting" && meeting.phase !== "revote") {
+    return;
+  }
+
+  const voter = imposterGameState.players.find(
+    (player) => player.id === voterId,
+  );
+
+  if (!voter || voter.eliminated) return;
+
+  if (meeting.votes[voterId]) return;
+
+  if (targetId !== "skip") {
+    if (!meeting.candidates.includes(targetId)) return;
+  }
+
+  meeting.votes[voterId] = targetId;
+
+  broadcastImposterState();
+
+  const eligibleVoters = getImposterLivingPlayers();
+
+  const allVoted = eligibleVoters.every((player) =>
+    Boolean(meeting.votes[player.id]),
+  );
+
+  if (allVoted) {
+    resolveImposterVotes();
+  }
+}
+
+function resolveImposterVotes() {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  const meeting = imposterGameState.meeting;
+
+  if (!meeting?.active) return;
+
+  const totals = {};
+
+  Object.values(meeting.votes).forEach((targetId) => {
+    if (targetId === "skip") return;
+
+    totals[targetId] = (totals[targetId] || 0) + 1;
+  });
+
+  const entries = Object.entries(totals);
+
+  if (!entries.length) {
+    finishImposterMeeting(null, "Everyone skipped. Nobody was eliminated.");
+    return;
+  }
+
+  const highest = Math.max(...entries.map((entry) => entry[1]));
+
+  const leaders = entries
+    .filter((entry) => entry[1] === highest)
+    .map((entry) => entry[0]);
+
+  if (leaders.length > 1) {
+    if (meeting.round === 1) {
+      meeting.round = 2;
+      meeting.tiedCandidates = leaders;
+      meeting.votes = {};
+      meeting.phase = "revote";
+      meeting.endsAt = Date.now() + MEETING_REVOTE_SECONDS * 1000;
+
+      meeting.candidates = [...leaders];
+
+      broadcastImposterState();
+      updateImposterMeetingInterface();
+
+      showImposterMessage("Tie! Revote between tied players.");
+      return;
+    }
+
+    finishImposterMeeting(null, "The revote was tied. Nobody was eliminated.");
+
+    return;
+  }
+
+  const targetId = leaders[0];
+
+  const target = imposterGameState.players.find(
+    (player) => player.id === targetId,
+  );
+
+  if (!target || target.eliminated) {
+    finishImposterMeeting(null, "No player was eliminated.");
+    return;
+  }
+
+  target.eliminated = true;
+
+  imposterGameState.bodies.push({
+    playerId: target.id,
+    x: target.x,
+    y: target.y,
+    reported: true,
+  });
+
+  finishImposterMeeting(target, `${target.name} was voted out.`);
+}
+
+function finishImposterMeeting(target, message) {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  imposterGameState.meeting = {
+    active: false,
+    phase: "ended",
+    message,
+    eliminatedPlayerId: target?.id || null,
+  };
+
+  broadcastImposterState();
+
+  if (imposterMeetingPanel) {
+    imposterMeetingPanel.style.display = "none";
+  }
+
+  showImposterMessage(message);
+
+  checkImposterWinConditions();
+}
+
+function updateImposterMeetingTimer() {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  const meeting = imposterGameState.meeting;
+
+  if (!meeting?.active) return;
+
+  if (Date.now() < meeting.endsAt) return;
+
+  if (meeting.phase === "discussion") {
+    beginImposterVoting();
+    return;
+  }
+
+  if (meeting.phase === "voting" || meeting.phase === "revote") {
+    resolveImposterVotes();
+  }
+}
+
+// ========================================
+// RENDER
+// ========================================
+
+function renderImposterGame() {
+  if (!imposterGameState || !imposterGamePage) return;
+
+  drawImposterMap(imposterContext);
+  renderImposterPlayerList();
+  renderImposterTaskProgress();
+  updateImposterGhostControls();
+  updateImposterMeetingInterface();
+}
+
+// ========================================
+// PUBLIC STATE
+// ========================================
+
+function getPublicImposterState(viewerId = null) {
+  if (!imposterGameState) return null;
+
+  const viewer = imposterGameState.players.find(
+    (player) => player.id === viewerId,
+  );
+
+  const viewerIsGhost = Boolean(viewer?.eliminated);
+
+  return {
+    players: imposterGameState.players.map((player) => {
+      const isViewer = player.id === viewerId;
+
+      // Living clients don't receive ghost coordinates.
+      const hideGhostPosition =
+        player.eliminated && !viewerIsGhost && !isViewer;
+
+      // Ghost clients receive no living player names or colors.
+      const hideLivingIdentity =
+        viewerIsGhost && !player.eliminated && !isViewer;
+
+      return {
+        id: player.id,
+        name: hideLivingIdentity ? "Crewmate" : player.name,
+        x: hideGhostPosition ? null : player.x,
+        y: hideGhostPosition ? null : player.y,
+        color: hideLivingIdentity ? "#cbd5e1" : player.color,
+        eliminated: player.eliminated,
+        tasksCompleted: player.tasksCompleted || 0,
+        lastKillAt: player.lastKillAt || 0,
+        emergencyMeetingsUsed: player.emergencyMeetingsUsed || 0,
+      };
+    }),
+
+    bodies: (imposterGameState.bodies || []).map((body) => ({
+      playerId: body.playerId,
+      x: body.x,
+      y: body.y,
+      reported: body.reported,
+    })),
+
+    meeting: imposterGameState.meeting
+      ? JSON.parse(JSON.stringify(imposterGameState.meeting))
+      : null,
+
+    completedTasks: getImposterCompletedTasks(),
+    totalTasks: getImposterTotalTasks(),
+    running: imposterGameState.running,
+  };
+}
+
+// ========================================
+// BROADCAST
+// ========================================
+
+function broadcastImposterState() {
+  if (!imposterGameIsHost || !imposterGameState) return;
+
+  hostConnections.forEach((connection, playerId) => {
+    if (!connection || !connection.open) return;
+
+    connection.send({
+      type: "imposter-state",
+      state: getPublicImposterState(playerId),
+    });
+  });
+
+  // The host receives its own full state.
+  renderImposterGame();
+}
+
+// ========================================
+// HOST NETWORK MESSAGE HANDLING
+// ========================================
+
+function handleImposterHostMessage(connection, data) {
+  if (!data || typeof data !== "object") return;
+  if (!imposterGameIsHost || !imposterGameState) return;
+  if (!imposterGameState.running) return;
+
+  const player = imposterGameState.players.find(
+    (item) => item.id === connection.peer,
+  );
+
+  if (!player) return;
+
+  // Task answers, including ghost tasks.
+  if (data.type === "imposter-task-answer") {
+    if (typeof data.taskId !== "string") return;
+    if (typeof data.answer !== "string") return;
+
+    completeImposterTask(connection.peer, data.taskId, data.answer);
+    return;
+  }
+
+  // Movement.
+  if (data.type === "imposter-move") {
+    if (imposterGameState.meeting?.active) return;
+
+    const x = Number(data.x);
+    const y = Number(data.y);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const dx = x - player.x;
+    const dy = y - player.y;
+
+    if (Math.hypot(dx, dy) > 65) return;
+
+    moveImposterPlayer(player, dx, dy);
+
+    broadcastImposterState();
+    return;
+  }
+
+  // Unlock request.
+  if (data.type === "imposter-unlock") {
+    if (player.role !== "imposter") return;
+    if (player.eliminated || player.unlocked) return;
+    if (imposterGameState.meeting?.active) return;
+
+    player.unlocked = true;
+
+    const connectionToPlayer = hostConnections.get(player.id);
+
+    if (connectionToPlayer && connectionToPlayer.open) {
+      connectionToPlayer.send({
+        type: "imposter-unlock-confirmed",
+      });
+    }
+
+    broadcastImposterState();
+    return;
+  }
+
+  // Imposter action.
+  if (data.type === "imposter-eliminate") {
+    if (player.role !== "imposter") return;
+    if (!player.unlocked || player.eliminated) return;
+    if (typeof data.targetId !== "string") return;
+
+    const result = eliminateImposterPlayer(connection.peer, data.targetId);
+
+    connection.send({
+      type: "imposter-action-result",
+      success: result.success,
+      message: result.message || "",
+    });
+
+    return;
+  }
+
+  // Emergency meeting.
+  if (data.type === "imposter-emergency-meeting") {
+    if (player.eliminated) return;
+
+    startImposterMeeting("emergency", null, connection.peer);
+
+    return;
+  }
+
+  // Report a body.
+  if (data.type === "imposter-report-body") {
+    if (player.eliminated) return;
+    if (typeof data.bodyPlayerId !== "string") return;
+
+    const body = imposterGameState.bodies.find(
+      (item) => item.playerId === data.bodyPlayerId && !item.reported,
+    );
+
+    if (!body) return;
+
+    const distance = Math.hypot(player.x - body.x, player.y - body.y);
+
+    if (distance > MEETING_REPORT_DISTANCE) return;
+
+    startImposterMeeting("body", data.bodyPlayerId, connection.peer);
+
+    return;
+  }
+
+  // Voting.
+  if (data.type === "imposter-vote") {
+    if (typeof data.targetId !== "string") return;
+
+    registerImposterVote(connection.peer, data.targetId);
+  }
+}
+
+function setupImposterHostNetworking() {
+  if (imposterHostNetworkWrapped) return;
+  if (typeof setupHostConnection !== "function") return;
+
+  imposterHostNetworkWrapped = true;
+
+  const previousSetupHostConnection = setupHostConnection;
+
+  setupHostConnection = function (connection) {
+    previousSetupHostConnection(connection);
+
+    connection.on("data", (data) => {
+      handleImposterHostMessage(connection, data);
+    });
+  };
+}
+
+// ========================================
+// CLIENT NETWORKING
+// ========================================
+
+function setupImposterClientNetworking() {
+  if (imposterNetworkReady) return;
+  if (!myConnection) return;
+
+  imposterNetworkReady = true;
+
+  myConnection.on("data", (data) => {
+    if (!data || typeof data !== "object") return;
+
+    if (data.type === "imposter-task-result") {
+      receiveImposterTaskResult(data);
+    }
+
+    if (data.type === "imposter-state") {
+      imposterGameState = data.state;
+
+      const localPlayer = getImposterLocalPlayer();
+
+      if (localPlayer?.eliminated) {
+        imposterSpectateIndex = 0;
+      }
+
+      renderImposterGame();
+    }
+
+    if (data.type === "imposter-unlock-confirmed") {
+      imposterUnlocked = true;
+      renderImposterTaskProgress();
+    }
+
+    if (data.type === "imposter-action-result" && !data.success) {
+      showImposterMessage(data.message || "Action failed.");
+    }
+
+    if (data.type === "imposter-ended") {
+      showImposterResult(data.winner, data.message);
+    }
+  });
+}
+
+// ========================================
+// WIN CONDITIONS
+// ========================================
+
+function checkImposterWinConditions() {
+  if (!imposterGameIsHost || !imposterGameState) return;
+  if (!imposterGameState.running) return;
+  if (imposterGameState.meeting?.active) return;
+
+  const livingImposters = getImposterLivingImposters();
+  const livingCrew = getImposterLivingCrew();
+
+  if (livingImposters.length === 0) {
+    endImposterGame(
+      "crewmates",
+      "All Imposters have been caught! Crewmates win!",
+    );
+    return;
+  }
+
+  if (livingCrew.length <= livingImposters.length) {
+    endImposterGame(
+      "imposter",
+      "The Imposters have taken control! Imposters win!",
+    );
+    return;
+  }
+
+  const total = getImposterTotalTasks();
+  const completed = getImposterCompletedTasks();
+
+  if (total > 0 && completed >= total) {
+    endImposterGame("crewmates", "All tasks completed! Crewmates win!");
+  }
+}
+
+function endImposterGame(winner, message) {
+  if (!imposterGameIsHost || !imposterGameState) return;
+  if (!imposterGameState.running) return;
+
+  imposterGameState.running = false;
+
+  hostConnections.forEach((connection) => {
+    if (connection && connection.open) {
+      connection.send({
+        type: "imposter-ended",
+        winner,
+        message,
+      });
+    }
+  });
+
+  showImposterResult(winner, message);
+}
+
+// ========================================
+// RESULTS
+// ========================================
+
+function createImposterResultInterface() {
+  if (document.getElementById("imposter-result-panel")) {
+    imposterResultPanel = document.getElementById("imposter-result-panel");
+    return;
+  }
+
+  const panel = document.createElement("div");
+
+  panel.id = "imposter-result-panel";
+
+  panel.style.cssText = `
+    display:none;
+    position:fixed;
+    inset:0;
+    z-index:10020;
+    background:rgba(0,0,0,0.9);
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  `;
+
+  panel.innerHTML = `
+    <div style="
+      background:#1e293b;
+      color:white;
+      width:100%;
+      max-width:420px;
+      padding:30px;
+      border-radius:18px;
+      text-align:center;
+    ">
+      <h1 id="imposter-result-title">Game Over</h1>
+      <p id="imposter-result-message"></p>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  imposterResultPanel = panel;
+}
+
+function showImposterResult(winner, message) {
+  createImposterResultInterface();
+
+  document.getElementById("imposter-result-title").textContent =
+    winner === "crewmates" ? "CREWMATES WIN!" : "IMPOSTERS WIN!";
+
+  document.getElementById("imposter-result-message").textContent =
+    message || "Game over.";
+
+  imposterResultPanel.style.display = "flex";
+
+  imposterGameRunning = false;
+
+  if (imposterAnimationFrame) {
+    cancelAnimationFrame(imposterAnimationFrame);
+    imposterAnimationFrame = null;
+  }
+
+  if (imposterMeetingPanel) {
+    imposterMeetingPanel.style.display = "none";
+  }
+}
+
+// ========================================
+// INPUT CONTROLS
+// ========================================
+
+function setupImposterControls() {
+  if (window.imposterControlsReady) return;
+
+  window.imposterControlsReady = true;
+
+  document.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+
+    if (
+      ["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)
+    ) {
+      event.preventDefault();
+    }
+
+    imposterKeys[key] = true;
+
+    if (!imposterGameRunning) return;
+
+    const taskPanelOpen =
+      document.getElementById("imposter-task-panel")?.style.display === "flex";
+
+    const unlockPanelOpen =
+      document.getElementById("imposter-unlock-panel")?.style.display ===
+      "flex";
+
+    const meetingOpen =
+      document.getElementById("imposter-meeting-panel")?.style.display ===
+      "flex";
+
+    if (taskPanelOpen || unlockPanelOpen || meetingOpen) return;
+
+    if (key === "r") {
+      reportNearbyImposterBody();
+      return;
+    }
+
+    if (key === "e") {
+      if (imposterLocalRole === "crewmate") {
+        const task = findNearbyImposterTask();
+
+        if (task) {
+          openImposterTask(task);
+          return;
+        }
+      }
+
+      if (imposterLocalRole === "imposter" && !imposterUnlocked) {
+        const player = getImposterLocalPlayer();
+
+        if (
+          player &&
+          Math.hypot(player.x - 480, player.y - 352) < IMPOSTER_UNLOCK_DISTANCE
+        ) {
+          openImposterUnlock();
+        }
+      }
+    }
+
+    if (key === "q" && imposterLocalRole === "imposter") {
+      tryImposterAction();
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    imposterKeys[event.key.toLowerCase()] = false;
+  });
+
+  window.addEventListener("blur", () => {
+    imposterKeys = {};
+  });
+}
+
+// ========================================
+// GAME LOOP
+// ========================================
+
+function updateImposterMovement() {
+  if (!imposterGameRunning || !imposterGameState) return;
+  if (!imposterGameState.running) return;
+  if (imposterGameState.meeting?.active) return;
+  if (imposterSpectating) return;
+
+  const taskPanelOpen =
+    document.getElementById("imposter-task-panel")?.style.display === "flex";
+
+  const unlockPanelOpen =
+    document.getElementById("imposter-unlock-panel")?.style.display === "flex";
+
+  if (taskPanelOpen || unlockPanelOpen) return;
+
+  const player = getImposterLocalPlayer();
+
+  if (!player) return;
+
+  // Living players cannot move after elimination.
+  // Ghosts can continue moving.
+  if (player.eliminated && !imposterLocalPlayerIsGhost()) return;
+
+  let dx = 0;
+  let dy = 0;
+
+  if (imposterKeys["w"] || imposterKeys["arrowup"]) dy -= 1;
+  if (imposterKeys["s"] || imposterKeys["arrowdown"]) dy += 1;
+  if (imposterKeys["a"] || imposterKeys["arrowleft"]) dx -= 1;
+  if (imposterKeys["d"] || imposterKeys["arrowright"]) dx += 1;
+
+  if (dx === 0 && dy === 0) return;
+
+  const length = Math.hypot(dx, dy);
+
+  dx = (dx / length) * PLAYER_SPEED;
+  dy = (dy / length) * PLAYER_SPEED;
+
+  const oldX = player.x;
+  const oldY = player.y;
+
+  moveImposterPlayer(player, dx, dy);
+
+  if (oldX === player.x && oldY === player.y) return;
+
+  if (imposterGameIsHost) {
+    const now = Date.now();
+
+    if (now - imposterLastBroadcast > 70) {
+      imposterLastBroadcast = now;
+      broadcastImposterState();
+    }
+  } else if (myConnection && myConnection.open) {
+    myConnection.send({
+      type: "imposter-move",
+      x: player.x,
+      y: player.y,
+    });
+  }
+}
+
+function imposterGameLoop() {
+  if (!imposterGameRunning) return;
+
+  updateImposterMovement();
+
+  if (imposterGameIsHost) {
+    updateImposterMeetingTimer();
+  }
+
+  renderImposterGame();
+
+  imposterAnimationFrame = requestAnimationFrame(imposterGameLoop);
+}
+
+// ========================================
+// START GAME - HOST
+// ========================================
+
+function startImposterGame() {
+  if (!isRoomHost) {
+    showImposterMessage("Only the host can start the game.");
+    return;
+  }
+
+  if (roomPlayers.size < IMPOSTER_MIN_PLAYERS) {
+    showImposterMessage(
+      `You need at least ${IMPOSTER_MIN_PLAYERS} players to start.`,
+    );
+    return;
+  }
+
+  const roomMembers = Array.from(roomPlayers.values());
+
+  if (roomMembers.length > IMPOSTER_MAX_PLAYERS) {
+    showImposterMessage(
+      `This game supports up to ${IMPOSTER_MAX_PLAYERS} players.`,
+    );
+    return;
+  }
+
+  setupImposterHostNetworking();
+
+  const imposterCount = getImposterCountForPlayers(roomMembers.length);
+
+  const shuffledMembers = shuffleImposterArray(roomMembers);
+
+  const selectedImposterIds = new Set(
+    shuffledMembers.slice(0, imposterCount).map((member) => member.id),
+  );
+
+  imposterPrivateTasks = {};
+
+  const players = roomMembers.map((member, index) => {
+    const role = selectedImposterIds.has(member.id) ? "imposter" : "crewmate";
+
+    if (role === "crewmate") {
+      imposterPrivateTasks[member.id] = createRandomImposterTasks();
+    } else {
+      imposterPrivateTasks[member.id] = [];
+    }
+
+    return {
+      id: member.id,
+      name: member.username || member.name || "Player",
+      x: 480 + (index % 4) * 30,
+      y: 352 + Math.floor(index / 4) * 30,
+      color: getImposterPlayerColor(index),
+      eliminated: false,
+      tasksCompleted: 0,
+      role,
+      unlocked: false,
+      lastKillAt: 0,
+      emergencyMeetingsUsed: 0,
+    };
+  });
+
+  imposterGameState = {
+    players,
+    bodies: [],
+    meeting: {
+      active: false,
+      phase: "none",
+    },
+    running: true,
+  };
+
+  const hostPlayer = players.find((player) => player.id === "host");
+
+  if (!hostPlayer) {
+    showImposterMessage("Host player was not found.");
+    return;
+  }
+
+  imposterGameIsHost = true;
+  imposterLocalPlayerId = "host";
+  imposterLocalRole = hostPlayer.role;
+
+  imposterUnlocked = false;
+  imposterQuestionsAnswered = 0;
+  imposterCurrentUnlockQuestion = 0;
+
+  imposterLocalTasks = (imposterPrivateTasks.host || []).map((task) => ({
+    ...task,
+  }));
+
+  imposterNetworkReady = false;
+  imposterSpectating = false;
+
+  showImposterGamePage();
+
+  document.getElementById("imposter-role-label").textContent =
+    `You are a ${imposterLocalRole.toUpperCase()}!`;
+
+  document.getElementById("imposter-host-meeting-settings").style.display =
+    "block";
+
+  document.getElementById("imposter-discussion-setting").value =
+    imposterDiscussionSeconds;
+
+  hostConnections.forEach((connection, playerId) => {
+    if (!connection || !connection.open) return;
+
+    const player = players.find((item) => item.id === playerId);
+
+    if (!player) return;
+
+    connection.send({
+      type: "imposter-start",
+      state: getPublicImposterState(playerId),
+      role: {
+        role: player.role,
+        tasks: imposterPrivateTasks[playerId] || [],
+      },
+    });
+  });
+
+  setupImposterControls();
+
+  imposterGameRunning = true;
+
+  broadcastImposterState();
+
+  if (imposterAnimationFrame) {
+    cancelAnimationFrame(imposterAnimationFrame);
+  }
+
+  imposterGameLoop();
+}
+
+// ========================================
+// START GAME - CLIENT
+// ========================================
+
+function startImposterGameClient(state, roleData) {
+  if (!state) return;
+
+  imposterGameIsHost = false;
+
+  imposterLocalPlayerId =
+    typeof multiplayerPeer !== "undefined" && multiplayerPeer
+      ? multiplayerPeer.id
+      : null;
+
+  if (!imposterLocalPlayerId) {
+    console.error("Could not find this client's PeerJS ID!");
+    return;
+  }
+
+  console.log("Imposter client player ID:", imposterLocalPlayerId);
+
+  if (typeof roleData === "string") {
+    imposterLocalRole = roleData;
+    imposterLocalTasks = [];
+  } else {
+    imposterLocalRole = roleData?.role || "crewmate";
+
+    imposterLocalTasks = (roleData?.tasks || []).map((task) => ({ ...task }));
+  }
+
+  imposterUnlocked = false;
+  imposterQuestionsAnswered = 0;
+  imposterCurrentUnlockQuestion = 0;
+
+  imposterGameState = state;
+  imposterNetworkReady = false;
+  imposterSpectating = false;
+
+  const localPlayer = getImposterLocalPlayer();
+
+  if (!localPlayer) {
+    console.error(
+      "This client was not found in the Imposters player list:",
+      imposterLocalPlayerId,
+      state.players,
+    );
+    return;
+  }
+
+  showImposterGamePage();
+
+  document.getElementById("imposter-role-label").textContent =
+    `You are a ${imposterLocalRole.toUpperCase()}!`;
+
+  document.getElementById("imposter-host-meeting-settings").style.display =
+    "none";
+
+  setupImposterControls();
+  setupImposterClientNetworking();
+
+  imposterGameRunning = true;
+
+  renderImposterGame();
+
+  if (imposterAnimationFrame) {
+    cancelAnimationFrame(imposterAnimationFrame);
+  }
+
+  imposterGameLoop();
+}
+
+// ========================================
+// INITIALIZATION
+// ========================================
+
+createImposterGamePage();
+createImposterTaskInterface();
+createImposterUnlockInterface();
+createImposterResultInterface();
+createImposterMeetingInterface();
+
+setupImposterControls();
+setupImposterHostNetworking();
+
+console.log("Imposters Update 2 loaded successfully!");
